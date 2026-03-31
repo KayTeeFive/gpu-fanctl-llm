@@ -266,7 +266,6 @@ def gpu_worker(hw: str, stop_event: threading.Event, alive_cb, color: str = "") 
     last_percent:       float | None = None
     last_temp_snapshot: list  | None = None
     last_adjust_time:   float        = 0.0
-    last_force_time:    float        = 0.0
     power_hits:         int          = 0
 
     while not stop_event.is_set():
@@ -324,19 +323,22 @@ def gpu_worker(hw: str, stop_event: threading.Event, alive_cb, color: str = "") 
 
         if last_percent is None:
             apply = True
+            #log.debug(f"[{label}] ALLOW SET by last_percent is None")
         elif target_percent > last_percent:
             apply = True
+            #log.debug(f"[{label}] ALLOW SET by target_percent > last_percent")
         elif target_percent < last_percent:
             apply = temp_changed and (now - last_adjust_time >= DOWN_DELAY)
             if apply:
                 last_adjust_time = now
+                #log.debug(f"[{label}] ALLOW SET by DOWN_DELAY")
         else:
             apply = False
 
         # ── Heartbeat force ──────────────────────────────────
-        if now - last_force_time >= FORCE_INTERVAL:
+        if now - last_adjust_time >= FORCE_INTERVAL:
             apply = True
-            last_force_time = now
+            #log.debug(f"[{label}] ALLOW SET by FORCE_INTERVAL")
 
         # ── Apply + drift correction ─────────────────────────
         target_rpm     = percent_to_rpm(target_percent)
