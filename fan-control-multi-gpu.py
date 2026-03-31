@@ -265,7 +265,7 @@ def gpu_worker(hw: str, stop_event: threading.Event, alive_cb, color: str = "") 
 
     last_percent:       float | None = None
     last_temp_snapshot: list  | None = None
-    last_down_time:     float        = 0.0
+    last_adjust_time:   float        = 0.0
     last_force_time:    float        = 0.0
     power_hits:         int          = 0
 
@@ -327,9 +327,9 @@ def gpu_worker(hw: str, stop_event: threading.Event, alive_cb, color: str = "") 
         elif target_percent > last_percent:
             apply = True
         elif target_percent < last_percent:
-            apply = temp_changed and (now - last_down_time >= DOWN_DELAY)
+            apply = temp_changed and (now - last_adjust_time >= DOWN_DELAY)
             if apply:
-                last_down_time = now
+                last_adjust_time = now
         else:
             apply = False
 
@@ -355,6 +355,7 @@ def gpu_worker(hw: str, stop_event: threading.Event, alive_cb, color: str = "") 
             set_speed(hw, target_percent, target_rpm)
 
         if apply:
+            last_adjust_time   = now
             last_percent       = target_percent
             last_temp_snapshot = list(snap)
             log.info(
