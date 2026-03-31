@@ -1,0 +1,46 @@
+[Unit]
+Description=Multi-GPU Fan Control (WX9100 / MI25)
+
+# Disable default dependencies to allow early startup
+DefaultDependencies=no
+
+# Ensure udev has initialized devices (so /sys/class/drm exists)
+After=systemd-udevd.service
+
+# Start before most user services
+Before=multi-user.target
+
+# Optional: only start if hwmon devices exist
+ConditionPathExistsGlob=/sys/class/drm/card*/device/hwmon/hwmon*
+
+[Service]
+# Use systemd notify protocol (READY=1, WATCHDOG=1)
+Type=notify
+
+# Path to your script
+ExecStart=/usr/bin/env python3 /usr/local/bin/fan-control-multi-gpu.py
+
+# Systemd watchdog timeout (must be > SYSTEMD_INTERVAL in your script)
+WatchdogSec=30s
+
+# Always restart if the process exits/crashes
+Restart=always
+RestartSec=3
+
+# Time allowed for the service to send READY=1
+TimeoutStartSec=30
+
+# Run as root (required for writing to /sys)
+User=root
+Group=root
+
+# Log to journal
+StandardOutput=journal
+StandardError=journal
+
+# Do not kill child threads aggressively
+KillMode=process
+
+[Install]
+# Start during normal multi-user boot
+WantedBy=multi-user.target
