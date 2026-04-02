@@ -1,4 +1,4 @@
-# gpu-fanctl-llm
+# Multi-Gpu Fan Control
 Custom service for multi-GPU fan control optimized for LLM workloads, prioritizing thermal stability and throttling prevention over acoustics.
 
 A custom service for controlling fan behavior across multiple GPUs, specifically tuned for LLM and embedding workloads.
