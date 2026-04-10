@@ -24,12 +24,10 @@ PCI_ID_TARGET  = "0x1002:0x6861"
 # TARGET_NAME  = "MI25"
 # PCI_ID_TARGET = "0x1002:0x6860"
 
-# --- Fan limits ---
-MAX_RPM = 4000
-
-# --- Power override ---
+# --- FAN Power override ---
 POWER_LIMIT            = 155   # W
 POWER_SAMPLES_TRIGGER  = 3     # consecutive samples above limit
+FAN_MIN_SPEED_OVERRIDE = 75    # PWM %
 
 # --- Hysteresis / timing ---
 TEMP_HYST      = 2          # °C — minimum change to consider temp "changed"
@@ -266,6 +264,8 @@ def gpu_worker(hw: str, stop_event: threading.Event, alive_cb, color: str = "") 
     last_percent:       float | None = None
     last_temp_snapshot: list  | None = None
     last_adjust_time:   float        = 0.0
+    last_fan_override:  float        = 0.0
+    fan_speed_override: bool         = False
     power_hits:         int          = 0
 
     while not stop_event.is_set():
@@ -277,12 +277,25 @@ def gpu_worker(hw: str, stop_event: threading.Event, alive_cb, color: str = "") 
             alive_cb()
             continue
 
-        # ── Power override ───────────────────────────────────
-        if m["power"] >= POWER_LIMIT:
+        now = time.monotonic()
+
+        # ── Fan speed override by GPU power consumption ──────
+        if m["power"] >= POWER_LIMIT and power_hits < 3:
             power_hits += 1
-        else:
-            power_hits = 0
-        power_override = power_hits >= POWER_SAMPLES_TRIGGER
+        elif power_hits > 0:
+            power_hits -= 1
+
+        if power_hits >= POWER_SAMPLES_TRIGGER:
+            fan_speed_override = True
+            last_fan_override = now
+            log.debug(f"[{label}] FAN speed override -> enabled")
+        # Reset FAN speed override after delay
+        elif fan_speed_override and now - last_fan_override > DOWN_DELAY:
+            fan_speed_override = False
+            log.debug(f"[{label}] FAN speed override -> disabled")
+        # Show that FAN speed override is active because of delay
+        elif fan_speed_override and now - last_fan_override <= DOWN_DELAY:
+            log.debug(f"[{label}] FAN speed override by spin down delay")
 
         # ── Target fan % from curves ─────────────────────────
         target_percent = max(
@@ -291,10 +304,14 @@ def gpu_worker(hw: str, stop_event: threading.Event, alive_cb, color: str = "") 
             interpolate(m["mem"],      CURVES["mem"]),
         )
 
-        if power_override:
-            target_percent = max(target_percent, 75)
+        if fan_speed_override:
+            target_percent = max(target_percent, FAN_MIN_SPEED_OVERRIDE)
+            reason = (
+                "power trigger" if m["power"] >= POWER_LIMIT
+                else f"cooldown ({now - last_fan_override:.1f}s)"
+            )
             log.info(
-                f"[{label}] {YELLOW}Power override: "
+                f"[{label}] {YELLOW}FAN speed override active [{reason}]: "
                 f"{m['power']:.1f}W > {POWER_LIMIT}W → {target_percent}%{RESET}"
             )
 
@@ -319,34 +336,32 @@ def gpu_worker(hw: str, stop_event: threading.Event, alive_cb, color: str = "") 
             any(abs(snap[i] - last_temp_snapshot[i]) >= TEMP_HYST for i in range(3))
         )
 
-        now = time.monotonic()
-
         if last_percent is None:
             apply = True
-            #log.debug(f"[{label}] ALLOW SET by last_percent is None")
+            log.debug(f"[{label}] ALLOW SET by last_percent is None")
         elif target_percent > last_percent:
             apply = True
-            #log.debug(f"[{label}] ALLOW SET by target_percent > last_percent")
+            log.debug(f"[{label}] ALLOW SET by target_percent > last_percent")
         elif target_percent < last_percent:
             apply = temp_changed and (now - last_adjust_time >= DOWN_DELAY)
             if apply:
                 last_adjust_time = now
-                #log.debug(f"[{label}] ALLOW SET by DOWN_DELAY")
+                log.debug(f"[{label}] ALLOW SET by DOWN_DELAY")
         else:
             apply = False
 
         # ── Heartbeat force ──────────────────────────────────
         if now - last_adjust_time >= FORCE_INTERVAL:
             apply = True
-            #log.debug(f"[{label}] ALLOW SET by FORCE_INTERVAL")
+            log.debug(f"[{label}] ALLOW SET by FORCE_INTERVAL")
 
         # ── Apply + drift correction ─────────────────────────
-        target_rpm     = percent_to_rpm(target_percent)
+        target_rpm = percent_to_rpm(target_percent)
         current_rpm = get_current_rpm(hw)
         current_percent = get_current_percent(hw)
         drift = abs(current_percent - target_percent)
-        #is_drift   = current_rpm is None or abs(current_rpm - target_rpm) > RPM_TOLERANCE
-        is_drift   = current_percent is None or abs(current_percent - target_percent) > PERCENT_TOLERANCE
+        #is_drift = current_rpm is None or abs(current_rpm - target_rpm) > RPM_TOLERANCE
+        is_drift = current_percent is None or abs(current_percent - target_percent) > PERCENT_TOLERANCE
 
         log.info(f"[{label}] Target: {target_percent:.1f}% / {target_rpm} rpm | Current: {current_percent:.1f}% / {current_rpm} rpm | Drift: {drift:.1f}%")
 
